@@ -1,0 +1,10 @@
+{
+  "name": "Frontier-Extended",
+  "version": "0.18.0",
+  "title": "Frontier Extended",
+  "author": "Groumpfyy",
+  "contact": "",
+  "homepage": "",
+  "description": "A challenge map to find the silo and launch a rocket.  Based on a scenario released for 0.14 by MagmaMcFry, modified for 0.17 by MojoD.",
+  "factorio_version": "0.18"
+}
