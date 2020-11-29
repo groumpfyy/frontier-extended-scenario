@@ -1,8 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1
+Date: 2020.11.29
+  Changes:
+    - Updated for 1.1
+  Bugfixes:
+    - Fix crash when moving silo before first moving character
+---------------------------------------------------------------------------------------------------
 Version: 0.18.0
-Date: 04. 02. 2020
+Date: 2020.02.04
   Changes:
     - Added /refreshsilo and /movesilo commands
   Bugfixes:
     - Moving the silo to existing chunks now works
----------------------------------------------------------------------------------------------------

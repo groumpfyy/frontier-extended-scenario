@@ -169,13 +169,21 @@ end
 local register_commands = function()
   commands.add_command("refreshsilo", "Move the silo to match the current global.x/global.y settings", function(e) 
     refresh_silo(e)
+    local player = game.players[e.player_index]
+    player.print("Silo recreated")
   end)
   commands.add_command("movesilo", "Move the silo further/closer", function(e) 
+    if not global.silo_created then
+      global.silo_created = true
+      refresh_silo()
+    end
     offset = tonumber(e.parameter)
     if offset ~= nil then
       global.x = global.x + offset
       global.y = math.random(-silo_radius, silo_radius)
       refresh_silo(e)
+      local player = game.players[e.player_index]
+      player.print("Moved silo by " .. tostring(offset))
     end
   end)
 end
