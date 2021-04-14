@@ -62,6 +62,17 @@ local refresh_silo = function()
     end
   end
   surface.set_tiles(tiles, true)
+
+  local tiles = {}
+  local i = 1
+  for df = -7,7 do
+    tiles[i] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y-7+14}}
+    tiles[i+1] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y+7+14}}
+    tiles[i+2] = {name = "hazard-concrete-left", position = {global.x-7+14, global.y+df+14}}
+    tiles[i+3] = {name = "hazard-concrete-left", position = {global.x+7+14, global.y+df+14}}
+    i=i+4
+  end
+  surface.set_tiles(tiles, true)
 end
 
 local frontier = {}
