@@ -7,7 +7,11 @@
 --  - Added /movesilo command and /refreshsilo commands
 --  - Made the silo moves work on chunks that have already been generated
 
-local version = 2
+-- 2021-04-14 Groumpfyy
+-- - Moving the silo preserves contents/state
+-- - Added commands to control internal state (cost per rocket/tile, max distance, number of rockets to win)
+
+local version = 3
 
 local silo_center = 1700    --center point the silo will be to the right of spawn
 local silo_radius = 450     --radius around center point the silo will be
@@ -33,6 +37,13 @@ local seed_global_xy = function()
   end 
 end
 
+local move_silo = function(event, amount, contributor, on_launch)
+    global.x = global.x + amount
+    global.y = math.random(-silo_radius, silo_radius)
+    refresh_silo(e)
+    local player = game.players[e.player_index]
+    player.print("Moved silo by " .. tostring(amount).." thanks to .."..tostring(contributor))
+end
 
 -- Delete all silos, recreate 1 new one at the coordinate (preserve inventory)
 local refresh_silo = function()
@@ -262,19 +273,23 @@ local register_commands = function()
     local player = game.players[e.player_index]
     player.print("Silo recreated")
   end)
-  commands.add_command("movesilo", "Move the silo further/closer", function(e) 
-    if not global.silo_created then
-      global.silo_created = true
-      refresh_silo()
+  commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
+    local p = e.parameter
+    local parr = {}
+    for str in string.gmatch(p, "([^%s]+)") do
+      table.insert(parr, str)
     end
-    offset = tonumber(e.parameter)
-    if offset ~= nil then
-      global.x = global.x + offset
-      global.y = math.random(-silo_radius, silo_radius)
-      refresh_silo(e)
-      local player = game.players[e.player_index]
-      player.print("Moved silo by " .. tostring(offset))
+    if #parr < 2 then 
+      game.print("Not enough parameters to /movesilo")
+      return
     end
+
+    local amount = tonumber(table.remove(parr, 1))
+    local user = table.remove(parr, 1)
+    if amount ~= nil and user ~= nil then
+      move_silo(e, amount, user, false)
+    end
+  end)
 
   -- Control costs/internal values
   commands.add_command("addrocket", "Add (or remove) rockets to the win condition", function(e)
@@ -328,6 +343,39 @@ local register_commands = function()
   end)
 end
 
+local on_rocket_launched = function(event)
+  if global.no_victory then return end
+
+  local rocket = event.rocket
+  if not (rocket and rocket.valid) then return end
+
+  local force = rocket.force  
+  
+  global.scenario_finished = global.scenario_finished or false
+  if global.scenario_finished then
+    return
+  end
+
+  global.rockets_launched = global.rockets_launched + 1
+
+  if global.rockets_launched >= global.rockets_to_win then
+    global.scenario_finished = true
+
+    game.set_game_state
+    {
+      game_finished = true,
+      player_won = true,
+      can_continue = true,
+      victorious_force = force
+    }
+
+    return
+  end
+
+  -- A rocket was launched, we should check if there are deferred moves to do (and we do them no matter the inventory)
+  move_silo(0,"",true)
+end
+
 frontier.events =
 {
   [defines.events.on_player_created] = on_player_created,
@@ -344,6 +392,7 @@ frontier.on_init = function()
   -- Rockets/silo location management
   global.rockets_to_win = 1
   global.rockets_launched = 0
+  global.scenario_finished = false
   
   global.move_cost_ratio = 1 -- If the multipler is 2, you need to buy 2x the tiles to actually move 1x
   global.move_step = 500 -- By default, we only move 500 tiles at a time
