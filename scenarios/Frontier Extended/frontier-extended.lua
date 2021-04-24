@@ -37,6 +37,13 @@ local seed_global_xy = function()
   end 
 end
 
+local signstr = function(amount)
+  if amount > 0 then
+    return "+"..tostring(amount)
+  end
+  return tostring(amount)
+end
+
 -- Delete all silos, recreate 1 new one at the coordinate (preserve inventory)
 local refresh_silo = function(on_launch)
   seed_global_xy()
@@ -198,7 +205,7 @@ local move_silo = function(amount, contributor, on_launch)
   -- Remember the caller
   if amount ~= 0 and contributor ~= "" and contributor ~= nil then 
     if amount > 0 then 
-      table.insert(global.plus_contributors, contributor.."("..amount..")")
+      table.insert(global.plus_contributors, contributor.."(+"..amount..")")
     else
      table.insert(global.minus_contributors, contributor.."("..amount..")")
    end
@@ -222,27 +229,30 @@ local move_silo = function(amount, contributor, on_launch)
     end
 
     if new_x ~= global.x then -- If there is actually a move (if we call refresh_silo without moving X, Y will randomely jump anyway)
+      local str = ""
       if new_x > global.x then
-        local str = "Moved the silo forward by " .. tostring(new_x-global.x) .. " tiles thanks to the meanness of " .. table.concat(global.plus_contributors, ', ')
+        str = "Moved the silo forward by " .. tostring(new_x-global.x) .. " tiles thanks to the meanness of " .. table.concat(global.plus_contributors, ', ')
         if #global.minus_contributors > 0 then str = str.." and despite the kindness of "..table.concat(global.minus_contributors, ', ') end
-        game.print(str)
       else
-        local str = "Moved the silo backward by " .. tostring(new_x-global.x) .. " tiles thanks to the kindness of " .. table.concat(global.minus_contributors, ', ')
+        str = "Moved the silo backward by " .. tostring(new_x-global.x) .. " tiles thanks to the kindness of " .. table.concat(global.minus_contributors, ', ')
         if #global.plus_contributors > 0 then str = str.." and despite the meanness of "..table.concat(global.plus_contributors, ', ') end
-        game.print(str)
       end
+      game.print(str)
       
-      if new_x >= global.max_distance then
-        game.print("We have reached the MAXIMUM DISTANCE! Every "..tostring(global.rocket_step).." tiles will now add one more launch to win.")
-        if global.move_buffer>0 then game.print("We have "..tostring(global.move_buffer).." leftover tiles that we will use to add launches!") end
-        contributor = "everyone" -- we already ack'ed the list, just summarize
-      end
-
       global.plus_contributors = {}
       global.minus_contributors = {}
       global.x = new_x
       global.y = math.random(-silo_radius, silo_radius)
       refresh_silo(on_launch) -- Effect the silo move
+
+      if new_x >= global.max_distance then
+        game.print("We have reached the MAXIMUM DISTANCE! Every "..tostring(global.rocket_step).." tiles will now add one more launch to win.")
+        if global.move_buffer>0 then
+          table.insert(global.plus_contributors, "everyone("..global.move_buffer..")")
+          contributor = "everyone"
+          amount = global.move_buffer
+        end
+      end
     else
       move_silo = false -- We didn't actually move the silo
     end
@@ -254,20 +264,35 @@ local move_silo = function(amount, contributor, on_launch)
     if add_rocket > 0 then
       global.rockets_to_win = global.rockets_to_win + add_rocket
       global.move_buffer = global.move_buffer % global.rocket_step
-      if add_rocket > 1 then
-        game.print("Thanks to "..contributor..", we now need "..tostring(add_rocket).." extra launches to win. "..tostring(global.rockets_to_win-global.rockets_launched).." to go!")
-      else
-        game.print("Thanks to "..contributor..", we now need an extra launch to win. "..tostring(global.rockets_to_win-global.rockets_launched).." to go!")
+
+      -- Build contributor lines
+      local str_launch = tostring(add_rocket).." extra launches"
+      if add_rocket == 1 then str_launch = "one extra launch" end
+
+      local str = "Adding "..str_launch.." thanks to the meanness of " .. table.concat(global.plus_contributors, ', ')
+      if #global.minus_contributors > 0 then str = str.." and despite the kindness of "..table.concat(global.minus_contributors, ', ') end
+      game.print(str)
+
+      global.plus_contributors = {}
+      global.minus_contributors = {}
+      
+      str = tostring(global.rockets_to_win-global.rockets_launched).." launches to go!"
+      if global.move_buffer > 0 then
+        str = str.." And already "..tostring(global.move_buffer).." tiles out of "..tostring(global.rocket_step).." towards the next launch.")
       end
+      game.print(str)
     else
-      game.print("Thanks to "..contributor.." we are now "..tostring(amount).." tiles closer to one more rocket! "..tostring(global.rocket_step - global.move_buffer).." tiles to go!")
+      if amount > 0 then
+        game.print("Thanks to "..contributor..", we are now "..tostring(global.move_buffer).." ("..signstr(amount)..") tiles out of "..tostring(global.rocket_step).." towards the next launch.")
+      end
     end
   else -- We haven't reach the maximum distance, check if we should ack the contribution
     if amount ~= 0 and not move_silo then
+      local str1 = "Thanks to "..contributor..", the silo will move by "..tostring(global.move_buffer).." ("..signstr(amount)..")"
       if math.abs(global.move_buffer) < global.move_step then -- Below move threshold
-        game.print("Thanks to "..contributor.." the silo will move by an extra "..tostring(amount).." tiles when we reach "..tostring(global.move_step).." tiles to move.")
+        game.print(str1.." when we reach a total of "..tostring(global.move_step).." tiles.")
       else
-        game.print("Thanks to "..contributor.." the silo will move by an extra "..tostring(amount).." tiles after the next launch for a total of "..tostring(global.move_buffer).." tiles.")
+        game.print(str1.." after the next launch.")
       end
     end
   end
