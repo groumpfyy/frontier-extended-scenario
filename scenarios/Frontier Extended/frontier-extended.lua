@@ -44,7 +44,6 @@ local refresh_silo = function()
   -- Remove all silos blindly, we count the output inventory so we don't lose science
   local surface = game.get_surface(1)
 
-  -- local input_inventory = {} -- We do not keep the input inventory when it jumps, otherwise it looks like we managed to get something in it after it moved
   local output_inventory = {}
   local rocket_inventory = {}
   local module_inventory = {}
@@ -52,6 +51,7 @@ local refresh_silo = function()
 
   for _, entity in pairs(surface.find_entities_filtered{name = "rocket-silo"}) do
     local i = nil
+    local input_inventory = {} -- We do not keep the input inventory when it jumps, otherwise it looks like we managed to get something in it after it moved
 
     -- What module the entity has
     i = entity.get_module_inventory()
@@ -63,13 +63,13 @@ local refresh_silo = function()
     end
 
     -- What is in the input
-    -- i = entity.get_inventory(defines.inventory.assembling_machine_input)
-    -- if i ~= nil then
-    --   for n,c in pairs(i.get_contents()) do
-    --     if input_inventory[n] == nil then input_inventory[n] = 0 end
-    --     input_inventory[n] = input_inventory[n] + c
-    --   end
-    -- end
+    i = entity.get_inventory(defines.inventory.assembling_machine_input)
+    if i ~= nil then
+      for n,c in pairs(i.get_contents()) do
+        if input_inventory[n] == nil then input_inventory[n] = 0 end
+        input_inventory[n] = input_inventory[n] + c
+      end
+    end
 
     -- What is in the output slot
     i = entity.get_output_inventory()
@@ -97,13 +97,19 @@ local refresh_silo = function()
     if entity.rocket_parts then rocket_parts = rocket_parts + entity.rocket_parts end
 
     entity.destroy()
+
+    -- We put a chest with the inputs so they are not lost
+    if #input_inventory > 0 then 
+      chest = surface.create_entity{name = "wooden-chest", position = old_position, force="player", move_stuck_players=true}
+      chest.insert(input_inventory)
+    end
   end
 
   if rocket_parts > 100 then rocket_parts = 100 end -- Make sure we don't insert more than the max
 
   -- Clean the destination area so we can actually create the silo there, hope you didn't have anything there
   for _, entity in pairs(surface.find_entities_filtered{area = {{global.x+10, global.y+11},{global.x+18, global.y+19}}}) do
-    entity.destroy()
+    if entity.type ~= "character" then entity.destroy() end -- Don't go destroying players
   end
 
   -- Make sure we generate the chunk first (makes the game stutter a bit but I think it's fine)
@@ -111,7 +117,7 @@ local refresh_silo = function()
   surface.force_generate_chunk_requests() 
 
   -- Create the silo first to create the chunk (otherwise tiles won't be settable)
-  local silo = surface.create_entity{name = "rocket-silo", position = {global.x+14, global.y+14}, force = "player"}
+  local silo = surface.create_entity{name = "rocket-silo", position = {global.x+14, global.y+14}, force = "player", move_stuck_players=true}
   silo.destructible = false
   silo.minable = false
 
@@ -201,7 +207,7 @@ local move_silo = function(amount, contributor, on_launch)
       global.move_buffer = 0
     end
 
-    if new_x < left_water_boundary+30 then new_x = left_water_boundary+30 end
+    if new_x < -left_water_boundary+30 then new_x = -left_water_boundary+30 end
 
     if new_x ~= global.x then -- If there is actually a move (if we call refresh_silo without moving X, Y will randomely jump anyway)
       if new_x > global.x then
@@ -226,14 +232,16 @@ local move_silo = function(amount, contributor, on_launch)
     end
   else -- We didn't move (silo not empty, or not enough move)
     -- TODO, do we really want to indicate for each smaller than the limit contribution?
-    if global.x >= global.max_distance then
-      game.print("Thanks to ".. contributor.." we are "..tostring(amount).." tiles closer to one more rocket!")
-    else
-      if silo_empty then
-        -- There is nothing to do, it wasn't enough to actually move anything anyway
-        game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles when we reach "..tostring(global.move_step).." tiles to move.")
+    if amount ~= 0 then
+      if global.x >= global.max_distance then
+        game.print("Thanks to ".. contributor.." we are "..tostring(amount).." tiles closer to one more rocket!")
       else
-        game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles after the next launch for a total of "..tostring(global.move_buffer).." tiles.")
+        if silo_empty then
+          -- There is nothing to do, it wasn't enough to actually move anything anyway
+          game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles when we reach "..tostring(global.move_step).." tiles to move.")
+        else
+          game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles after the next launch for a total of "..tostring(global.move_buffer).." tiles.")
+        end
       end
     end
   end
@@ -340,7 +348,7 @@ local on_chunk_generated = function(event)
       for dx = 0, 4 do
         local px = event.area.left_top.x+dx+14
         if event.surface.can_place_entity{name = "stone-wall", position = {px, py}, force = "player"} then
-          local e = event.surface.create_entity{name = "stone-wall", position = {px, py}, force = "player"}
+          local e = event.surface.create_entity{name = "stone-wall", position = {px, py}, force = "player", move_stuck_players=true}
         end
       end
     end
@@ -409,6 +417,7 @@ local register_commands = function()
   commands.add_command("addrocket", "Add (or remove) rockets to the win condition", function(e)
     rw = tonumber(e.parameter)
     if rw ~= nil then
+      global.scenario_finished = false
       if not global.rockets_to_win then
         global.rockets_to_win = rw
       else
