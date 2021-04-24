@@ -131,6 +131,11 @@ local refresh_silo = function(on_launch)
   surface.request_to_generate_chunks({global.x+14, global.y+14}, 8)
   surface.force_generate_chunk_requests() 
 
+  -- Remove enemy bases
+  for _, entity in pairs(game.surfaces[1].find_entities_filtered{area = {{global.x+7, global.y+7},{global.x+21, global.y+21}}, force="enemy"}) do
+    if entity.type ~= "character" then entity.destroy() end -- Don't go destroying (enemy) players
+  end
+
   -- Create the silo first to create the chunk (otherwise tiles won't be settable)
   local silo = surface.create_entity{name = "rocket-silo", position = {global.x+14, global.y+14}, force = "player", move_stuck_players=true}
   silo.destructible = false
@@ -278,7 +283,7 @@ local move_silo = function(amount, contributor, on_launch)
       
       str = tostring(global.rockets_to_win-global.rockets_launched).." launches to go!"
       if global.move_buffer > 0 then
-        str = str.." And already "..tostring(global.move_buffer).." tiles out of "..tostring(global.rocket_step).." towards the next launch.")
+        str = str.." And already "..tostring(global.move_buffer).." tiles out of "..tostring(global.rocket_step).." towards an extra launch."
       end
       game.print(str)
     else
