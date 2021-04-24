@@ -38,7 +38,7 @@ local seed_global_xy = function()
 end
 
 -- Delete all silos, recreate 1 new one at the coordinate (preserve inventory)
-local refresh_silo = function()
+local refresh_silo = function(on_launch)
   seed_global_xy()
 
   -- Remove all silos blindly, we count the output inventory so we don't lose science
@@ -52,6 +52,7 @@ local refresh_silo = function()
   for _, entity in pairs(surface.find_entities_filtered{name = "rocket-silo"}) do
     local i = nil
     local input_inventory = {} -- We do not keep the input inventory when it jumps, otherwise it looks like we managed to get something in it after it moved
+    local has_inventory = false -- Because #input_inventory is broken in lua ?!
 
     -- What module the entity has
     i = entity.get_module_inventory()
@@ -68,6 +69,7 @@ local refresh_silo = function()
       for n,c in pairs(i.get_contents()) do
         if input_inventory[n] == nil then input_inventory[n] = 0 end
         input_inventory[n] = input_inventory[n] + c
+        has_inventory = true
       end
     end
 
@@ -90,18 +92,24 @@ local refresh_silo = function()
       end
     end
 
-    if entity.status == defines.entity_status.preparing_rocket_for_launch or
+    -- When called from on_rocket_launch, the status is still launching_rocket, so we can't use this
+    -- We must just ignore the status
+    if not on_launch and (entity.status == defines.entity_status.preparing_rocket_for_launch or
        entity.status == defines.entity_status.waiting_to_launch_rocket  or
-       entity.status == defines.entity_status.launching_rocket then rocket_parts = 100 end -- so that we put the new silo in Preparing for launch
+       entity.status == defines.entity_status.launching_rocket) then rocket_parts = 100 end -- so that we put the new silo in Preparing for launch
 
-    if entity.rocket_parts then rocket_parts = rocket_parts + entity.rocket_parts end
+    if entity.rocket_parts~=nil and entity.rocket_parts>0 then rocket_parts = rocket_parts + entity.rocket_parts end
+
+    local p = entity.position
 
     entity.destroy()
 
     -- We put a chest with the inputs so they are not lost
-    if #input_inventory > 0 then 
-      chest = surface.create_entity{name = "wooden-chest", position = old_position, force="player", move_stuck_players=true}
-      chest.insert(input_inventory)
+    if has_inventory then 
+      chest = surface.create_entity{name = "wooden-chest", position = p, force="player", move_stuck_players=true}
+      for n,c in pairs(input_inventory) do
+        chest.insert({name=n,count=c})
+      end
     end
   end
 
@@ -197,17 +205,21 @@ local move_silo = function(amount, contributor, on_launch)
  end
 
   -- If it's enough to trigger a move and the silo is empty (or it was a launch in case we move "forcefully")
-  if math.abs(global.move_buffer) >= global.move_step and silo_empty then
+  local move_silo = ((math.abs(global.move_buffer) >= global.move_step or global.x + global.move_buffer >= global.max_distance) and silo_empty)
+  if move_silo then
     local new_x = global.x
     if global.x + global.move_buffer >= global.max_distance then -- We reach the "end"
       global.move_buffer = global.x + global.move_buffer - global.max_distance
       new_x = global.max_distance
-    else -- We moved "enough"
-      new_x = global.x + global.move_buffer
-      global.move_buffer = 0
+    else 
+      if global.x + global.move_buffer < -left_water_boundary+30 then -- We are getting too close to water
+        global.move_buffer = global.x + global.move_buffer - (-left_water_boundary+30)
+        new_x = -left_water_boundary+30
+      else -- We moved "enough"
+        new_x = global.x + global.move_buffer
+        global.move_buffer = 0
+      end
     end
-
-    if new_x < -left_water_boundary+30 then new_x = -left_water_boundary+30 end
 
     if new_x ~= global.x then -- If there is actually a move (if we call refresh_silo without moving X, Y will randomely jump anyway)
       if new_x > global.x then
@@ -221,28 +233,18 @@ local move_silo = function(amount, contributor, on_launch)
       end
       
       if new_x >= global.max_distance then
-        game.print("We have reached the MAXIMUM DISTANCE! Tiles will now convert to extra launches.")
+        game.print("We have reached the MAXIMUM DISTANCE! Every "..tostring(global.rocket_step).." tiles will now add one more launch to win.")
+        if global.move_buffer>0 then game.print("We have "..tostring(global.move_buffer).." leftover tiles that we will use to add launches!") end
+        contributor = "everyone" -- we already ack'ed the list, just summarize
       end
 
       global.plus_contributors = {}
       global.minus_contributors = {}
       global.x = new_x
       global.y = math.random(-silo_radius, silo_radius)
-      refresh_silo() -- Effect the silo move
-    end
-  else -- We didn't move (silo not empty, or not enough move)
-    -- TODO, do we really want to indicate for each smaller than the limit contribution?
-    if amount ~= 0 then
-      if global.x >= global.max_distance then
-        game.print("Thanks to ".. contributor.." we are "..tostring(amount).." tiles closer to one more rocket!")
-      else
-        if silo_empty then
-          -- There is nothing to do, it wasn't enough to actually move anything anyway
-          game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles when we reach "..tostring(global.move_step).." tiles to move.")
-        else
-          game.print("Thanks to ".. contributor.." the silo will move by an extra "..tostring(amount).." tiles after the next launch for a total of "..tostring(global.move_buffer).." tiles.")
-        end
-      end
+      refresh_silo(on_launch) -- Effect the silo move
+    else
+      move_silo = false -- We didn't actually move the silo
     end
   end
 
@@ -257,35 +259,19 @@ local move_silo = function(amount, contributor, on_launch)
       else
         game.print("Thanks to "..contributor..", we now need an extra launch to win. "..tostring(global.rockets_to_win-global.rockets_launched).." to go!")
       end
+    else
+      game.print("Thanks to "..contributor.." we are now "..tostring(amount).." tiles closer to one more rocket! "..tostring(global.rocket_step - global.move_buffer).." tiles to go!")
+    end
+  else -- We haven't reach the maximum distance, check if we should ack the contribution
+    if amount ~= 0 and not move_silo then
+      if math.abs(global.move_buffer) < global.move_step then -- Below move threshold
+        game.print("Thanks to "..contributor.." the silo will move by an extra "..tostring(amount).." tiles when we reach "..tostring(global.move_step).." tiles to move.")
+      else
+        game.print("Thanks to "..contributor.." the silo will move by an extra "..tostring(amount).." tiles after the next launch for a total of "..tostring(global.move_buffer).." tiles.")
+      end
     end
   end
 end  
-
-
-  --   if (global.x + global.next_move_amount + amount > MAX_DISTANCE) then
-  --     if (user ~= nil) then table.insert(global.contributors, user.."("..amount..")") end
-  --     if (amount ~= nil) then global.left_over = global.left_over + amount end
-  --     if (global.left_over > EXTRA_SILO_TRESHOLD) then
-  --       local old_should_launch = global.rockets_should_launch
-  --       global.rockets_should_launch = global.rockets_should_launch + math.floor(global.left_over/EXTRA_SILO_TRESHOLD)
-  --       global.left_over = global.left_over%EXTRA_SILO_TRESHOLD
-  --       game.print("Increased the required amount of rockets from "..old_should_launch.." to "..global.rockets_should_launch.." and we are currently at "..global.rockets_launched.. " because of these beautiful souls: " .. table.concat(global.contributors, ', '))
-  --     end
-  --   else
-  --     if (user ~= nil) then table.insert(global.contributors, user.."("..amount..")") end
-  --     if (amount ~= nil) then global.next_move_amount = global.next_move_amount + amount end
-  --   end
-
-  -- if (global.next_move_amount ~= nil and global.next_move_amount > 0) then
-  --   global.x = global.x + global.next_move_amount
-  --   global.y = math.random(-silo_radius, silo_radius)
-  --   refresh_silo(e)
-  --   global.next_move_amount = 0
-  --   global.contributors = {}
-  --   game.print("Moved silo by " .. tostring(offset) .. " by these beautiful souls: " .. table.concat(global.contributors, ', '))
-  -- end
-
-
 
 local frontier = {}
 
@@ -379,7 +365,7 @@ end
 local on_player_changed_position = function(event)
   if not global.silo_created then
     global.silo_created = true
-    refresh_silo()
+    refresh_silo(false)
   end
 
   local player = game.players[event.player_index]
@@ -391,18 +377,19 @@ end
 
 local register_commands = function()
   commands.add_command("refreshsilo", "Move the silo to match the current global.x/global.y settings", function(e) 
-    refresh_silo()
+    refresh_silo(false)
     local player = game.players[e.player_index]
     player.print("Silo recreated")
   end)
   commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
+    local player = game.players[e.player_index]
     local p = e.parameter
     local parr = {}
     for str in string.gmatch(p, "([^%s]+)") do
       table.insert(parr, str)
     end
     if #parr < 2 then 
-      game.print("Not enough parameters to /movesilo")
+      player.print("Not enough parameters to /movesilo")
       return
     end
 
@@ -493,6 +480,8 @@ local on_rocket_launched = function(event)
     -- No more silo moves, we are done!
     return
   end
+
+  game.print("Rocket launches so far: " .. tostring(global.rockets_launched)..", "..tostring(global.rockets_to_win-global.rockets_launched).." to go!.")
 
   -- A rocket was launched, we should check if there are deferred moves to do (and we do them no matter the inventory)
   move_silo(0,"",true)
