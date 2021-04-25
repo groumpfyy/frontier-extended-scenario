@@ -515,7 +515,7 @@ local register_commands = function()
     cr = tonumber(e.parameter)
     if cr ~= nil then
       global.move_cost_ratio = cr
-      if global.move_cost_ratio < 1 then global.move_cost_ratio = 1 end
+      if global.move_cost_ratio <= 0 then global.move_cost_ratio = 1 end
     end
     game.print("You need to request a "..tostring(global.move_cost_ratio).." tile move to actually move the silo 1 tile.")
   end)
