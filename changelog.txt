@@ -5,7 +5,8 @@ Date: 2021.04.14
     - Silo moves are deferred until after a launch if the silo is "in-use"
     - When moving the silo past the max distance, adds rockets to the win condition
     - Win condition matched the number of rockets requested (instead of the first)
-    - Added /moveratio /rocketcost /maxdistance /movestep /addrocket 
+    - Added /moveratio /rocketcost /maxdistance /movestep /addrocket /rocketsperdeath
+    - Each death now adds one rocket to launch to win
 ---------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2020.11.29

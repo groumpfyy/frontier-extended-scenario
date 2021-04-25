@@ -307,7 +307,10 @@ local frontier = {}
 
 -- script.on_event(defines.events.on_player_created, 
 on_player_created = function(event)
+  if event.player_index == nil then return end
   local player = game.players[event.player_index]
+  if player == nil then return end
+
   player.insert{name="iron-plate", count=8}
   player.insert{name="pistol", count=1}
   player.insert{name="firearm-magazine", count=10}
@@ -392,6 +395,33 @@ end
 
 -- Make sure we catch players going off-bound and ... KRAKEN
 -- Also use the first time a player moves as our "randomness" for initial silo position
+local on_player_died = function(event)
+  if global.rockets_per_death <= 0 then return end
+  
+  local player_name = "a player"
+  if event.player_index ~= nil then
+    if game.players[event.player_index] ~= nil then
+      player_name = game.players[event.player_index].name
+    end
+  end
+
+  -- Build player death lines
+  local add_rocket = global.rockets_per_death
+
+  global.rockets_to_win = global.rockets_to_win + add_rocket
+  if global.rockets_to_win < 1 then global.rockets_to_win = 1 end
+
+  -- game.print("Rocket launches to win: " .. tostring(global.rockets_to_win).." with "..tostring(global.rockets_launched).." launches so far.")
+
+  local str_launch = tostring(add_rocket).." extra launches"
+  if add_rocket == 1 then str_launch = "one extra launch" end
+
+  game.print("Adding "..str_launch.." thanks to the death of " .. player_name)
+  game.print(tostring(global.rockets_to_win-global.rockets_launched).." launches to go!")
+end
+
+-- Make sure we catch players going off-bound and ... KRAKEN
+-- Also use the first time a player moves as our "randomness" for initial silo position
 local on_player_changed_position = function(event)
   if not global.silo_created then
     global.silo_created = true
@@ -408,19 +438,24 @@ end
 local register_commands = function()
   commands.add_command("refreshsilo", "Move the silo to match the current global.x/global.y settings", function(e) 
     refresh_silo(false)
-    local player = game.players[e.player_index]
-    player.print("Silo recreated")
+    if e.player_index ~= nil then
+      if game.players[e.player_index] ~= nil then
+        game.players[e.player_index].print("Silo recreated")
+      end
+    end
   end)
   commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
-    local player = game.players[e.player_index]
     local p = e.parameter
     local parr = {}
     for str in string.gmatch(p, "([^%s]+)") do
       table.insert(parr, str)
     end
     if #parr < 2 then 
-      player.print("Not enough parameters to /movesilo")
-      return
+      if e.player_index ~= nil then
+        if game.players[e.player_index] ~= nil then
+          game.players[e.player_index].print("Not enough parameters to /movesilo")
+        end
+      end
     end
 
     local amount = tonumber(table.remove(parr, 1))
@@ -462,6 +497,15 @@ local register_commands = function()
       if global.rocket_step < 1 then global.rocket_step = 1 end
     end
     game.print("Extra launches now cost "..tostring(global.rocket_step).." tiles each.")
+  end)
+
+  commands.add_command("rocketsperdeath", "Set the cost in rockets of a death", function(e)
+    rs = tonumber(e.parameter)
+    if rs ~= nil then
+      global.rockets_per_death = rs
+      if global.rockets_per_death < 0 then global.rockets_per_death = 0 end
+    end
+    game.print("Each player death now adds "..tostring(global.rockets_per_death).." rocket launches.")
   end)
 
   commands.add_command("maxdistance", "Set the maximum distance for the silo, adding tiles past this will add launches", function(e)
@@ -523,6 +567,7 @@ frontier.events =
   [defines.events.on_chunk_generated] = on_chunk_generated,
   [defines.events.on_research_finished] = on_research_finished,
   [defines.events.on_player_changed_position] = on_player_changed_position,
+  [defines.events.on_player_died] = on_player_died,
   [defines.events.on_rocket_launched] = on_rocket_launched,
 }
 
@@ -542,6 +587,8 @@ frontier.on_init = function()
   global.move_step = 500 -- By default, we only move 500 tiles at a time
   
   global.rocket_step = 500 -- How many "tiles" past the max distance adds a launch
+
+  global.rockets_per_death = 1 -- How many extra launch needed for each death
 
   global.max_distance = 100000 -- By default, 100k tiles max to the right
   
