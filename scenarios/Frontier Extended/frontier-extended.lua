@@ -11,6 +11,10 @@
 -- - Moving the silo preserves contents/state
 -- - Added commands to control internal state (cost per rocket/tile, max distance, number of rockets to win)
 
+-- 2021-04-25 Groumpfyy
+-- - Each death now adds one rocket to launch to win
+-- - Added /autoratiostep <mult> <step> to multiply the cost of a tile by <mult> every <step>. Defaults to multiply by 2 every 50k tiles
+
 local version = 3
 
 local silo_center = 1700    --center point the silo will be to the right of spawn
@@ -204,7 +208,14 @@ local move_silo = function(amount, contributor, on_launch)
     end
   end
 
-  if global.x < global.max_distance then amount = math.floor((amount / global.move_cost_ratio)+0.5) end -- We do not use the ratio once we are in add-rocket territory
+  if global.x < global.max_distance then 
+    local new_amount = math.floor((amount / global.move_cost_ratio)+0.5)
+    if new_amount == 0 then -- We make sure that we don't move by zero (if the donation is too small and the ratio too large)
+      if amount > 0 then new_amount = 1 end
+      if amount < 0 then new_amount = -1 end
+    end
+    amount = new_amount
+  end -- We do not use the ratio once we are in add-rocket territory
   global.move_buffer = global.move_buffer + amount
 
   -- Remember the caller
@@ -293,7 +304,7 @@ local move_silo = function(amount, contributor, on_launch)
     end
   else -- We haven't reach the maximum distance, check if we should ack the contribution
     if amount ~= 0 and not move_silo then
-      local str1 = "Thanks to "..contributor..", the silo will move by "..tostring(global.move_buffer).." ("..signstr(amount)..")"
+      local str1 = "Thanks to "..contributor..", the silo will move by "..tostring(global.move_buffer).." ("..signstr(amount)..") tiles"
       if math.abs(global.move_buffer) < global.move_step then -- Below move threshold
         game.print(str1.." when we reach a total of "..tostring(global.move_step).." tiles.")
       else
@@ -301,12 +312,29 @@ local move_silo = function(amount, contributor, on_launch)
       end
     end
   end
+
+  -- Keep track of the move forward for the purpose of multiplying cost
+  if amount ~= 0 then 
+    if global.x < global.max_distance then
+      global.move_buffer_ratio = global.move_buffer_ratio + amount
+      while global.move_buffer_ratio >= global.move_cost_step do
+        global.move_cost_ratio = global.move_cost_ratio * global.move_cost_ratio_mult
+        global.move_buffer_ratio = global.move_buffer_ratio - global.move_cost_step
+        local next_increment = global.move_cost_step - global.move_buffer_ratio
+        if next_increment < 0 then next_increment = 0 end
+        game.print("You must now request "..tostring(global.move_cost_ratio).." tiles to actually move by one tile. In "..tostring(next_increment).." tiles, we'll multiply that cost by "..tostring(global.move_cost_ratio_mult).." again.")
+      end
+    else
+      global.move_cost_ratio = global.move_cost_ratio_mult^math.floor(global.max_distance/global.move_cost_step)
+      -- game.print("You must now request "..tostring(global.move_cost_ratio).." tiles to actually move by one tile. In "..tostring(next_increment).." tiles, we'll multiply that cost by "..tostring(global.move_cost_ratio_mult).." again.")
+    end
+  end
 end  
 
 local frontier = {}
 
 -- script.on_event(defines.events.on_player_created, 
-on_player_created = function(event)
+local on_player_created = function(event)
   if event.player_index == nil then return end
   local player = game.players[event.player_index]
   if player == nil then return end
@@ -397,7 +425,7 @@ end
 -- Also use the first time a player moves as our "randomness" for initial silo position
 local on_player_died = function(event)
   if global.rockets_per_death <= 0 then return end
-  
+
   local player_name = "a player"
   if event.player_index ~= nil then
     if game.players[event.player_index] ~= nil then
@@ -446,6 +474,7 @@ local register_commands = function()
   end)
   commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
     local p = e.parameter
+    if p == nil then p = "" end
     local parr = {}
     for str in string.gmatch(p, "([^%s]+)") do
       table.insert(parr, str)
@@ -456,6 +485,7 @@ local register_commands = function()
           game.players[e.player_index].print("Not enough parameters to /movesilo")
         end
       end
+      return
     end
 
     local amount = tonumber(table.remove(parr, 1))
@@ -516,7 +546,31 @@ local register_commands = function()
     end
     game.print("The silo can now be at most "..tostring(global.max_distance).." tiles away.")
   end)
+  commands.add_command("autoratiostep", "Automatically multiply the cost ratio for on some step", function(e)
+    local p = e.parameter
+    if p == nil then p = "" end
+    local parr = {}
+    for str in string.gmatch(p, "([^%s]+)") do
+      table.insert(parr, str)
+    end
+    if #parr < 2 then 
+      if e.player_index ~= nil then
+        if game.players[e.player_index] ~= nil then
+          game.players[e.player_index].print("Not enough parameters to /autoratiostep, need <ratiomult> and <stepsize>")
+        end
+      end
+      return
+    end
 
+    local ratiomult = tonumber(table.remove(parr, 1))
+    local stepsize = tonumber(table.remove(parr, 1))
+
+    if ratiomult ~= nil and stepsize ~= nil then
+      global.move_cost_ratio_mult = ratiomult
+      global.move_cost_step = stepsize
+      game.print("The cost ratio will now be multiplied by "..tostring(global.move_cost_ratio_mult).." every "..tostring(global.move_cost_step).." tiles foward")
+    end
+  end)
   commands.add_command("movestep", "Set the number of actual tiles the silo moves in each step", function(e)
     ms = tonumber(e.parameter)
     if ms ~= nil then
@@ -592,6 +646,10 @@ frontier.on_init = function()
 
   global.max_distance = 100000 -- By default, 100k tiles max to the right
   
+  global.move_cost_ratio_mult = 2 -- Be default, we increase the "cost" of a tile by 2
+  global.move_cost_step = 50000 -- Every 50k tiles move
+  global.move_buffer_ratio = 0 -- How many tiles we have moved since the last ratio multiplier
+
   global.move_buffer = 0 -- How many tiles we haven't currently reflected (between +move_step and -move_step)
   global.plus_contributors = {} -- List of contributors so far (so that we can print when we actually move the silo)
   global.minus_contributors = {} -- List of contributors so far (so that we can print when we actually move the silo)
