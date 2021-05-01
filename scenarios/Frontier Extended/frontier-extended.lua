@@ -48,19 +48,44 @@ local signstr = function(amount)
   return tostring(amount)
 end
 
+local set_silo_tiles = function(surface)
+  -- put tiles around silo
+  local tiles = {}
+  local i = 1
+  for dx = -6,6 do
+    for dy = -6,6 do
+      tiles[i] = {name = "concrete", position = {global.x+dx+14, global.y+dy+14}}
+      i=i+1
+    end
+  end
+  for df = -6,6 do
+    tiles[i] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y-7+14}}
+    tiles[i+1] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y+7+14}}
+    tiles[i+2] = {name = "hazard-concrete-left", position = {global.x-7+14, global.y+df+14}}
+    tiles[i+3] = {name = "hazard-concrete-left", position = {global.x+7+14, global.y+df+14}}
+    i=i+4
+  end
+  surface.set_tiles(tiles, true)
+end
+
 -- Delete all silos, recreate 1 new one at the coordinate (preserve inventory)
-local refresh_silo = function(on_launch)
+local refresh_silo = function(on_launch,old_silos)
   seed_global_xy()
 
   -- Remove all silos blindly, we count the output inventory so we don't lose science
   local surface = game.get_surface(1)
+
+  -- If we were not given a list of old silos, we work on all of them
+  if old_silos == nil then
+    old_silos = surface.find_entities_filtered{name = "rocket-silo"}
+  end
 
   local output_inventory = {}
   local rocket_inventory = {}
   local module_inventory = {}
   local rocket_parts = 0
 
-  for _, entity in pairs(surface.find_entities_filtered{name = "rocket-silo"}) do
+  for _, entity in pairs(old_silos) do
     local i = nil
     local input_inventory = {} -- We do not keep the input inventory when it jumps, otherwise it looks like we managed to get something in it after it moved
     local has_inventory = false -- Because #input_inventory is broken in lua ?!
@@ -131,10 +156,6 @@ local refresh_silo = function(on_launch)
     if entity.type ~= "character" then entity.destroy() end -- Don't go destroying players
   end
 
-  -- Make sure we generate the chunk first (makes the game stutter a bit but I think it's fine)
-  surface.request_to_generate_chunks({global.x+14, global.y+14}, 8)
-  surface.force_generate_chunk_requests() 
-
   -- Remove enemy bases
   for _, entity in pairs(game.surfaces[1].find_entities_filtered{area = {{global.x+7, global.y+7},{global.x+21, global.y+21}}, force="enemy"}) do
     if entity.type ~= "character" then entity.destroy() end -- Don't go destroying (enemy) players
@@ -164,37 +185,20 @@ local refresh_silo = function(on_launch)
 
   silo.rocket_parts = rocket_parts
 
-  -- Put some concrete around it to be pretty (plus it leaves old concrete)
-  local tiles = {}
-  local i = 1
-  for dx = -7,7 do
-    for dy = -7,7 do
-      tiles[i] = {name = "concrete", position = {global.x+dx+14, global.y+dy+14}}
-      i=i+1
-    end
-  end
-  surface.set_tiles(tiles, true)
-
-  local tiles = {}
-  local i = 1
-  for df = -7,7 do
-    tiles[i] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y-7+14}}
-    tiles[i+1] = {name = "hazard-concrete-left", position = {global.x+df+14, global.y+7+14}}
-    tiles[i+2] = {name = "hazard-concrete-left", position = {global.x-7+14, global.y+df+14}}
-    tiles[i+3] = {name = "hazard-concrete-left", position = {global.x+7+14, global.y+df+14}}
-    i=i+4
-  end
-  surface.set_tiles(tiles, true)
+  set_silo_tiles(surface)
 end
 
 local move_silo = function(amount, contributor, on_launch)
   seed_global_xy() -- We need to make sure that X/Y are seesed (in case someone moves the silo before moving)
   local surface = game.get_surface(1)
 
+  -- We limit ourselves to the last good position of the silo, to avoid 130ms worth of work
+  local old_silos = surface.find_entities_filtered{area = {{global.x+7, global.y+7},{global.x+21, global.y+21}},name = "rocket-silo" }
+
   -- Make sure that all the silos can be destroyed (we shouldn't have more than one, but just in case)
   local silo_empty = true
   if not on_launch then -- When we do not launch (external request)
-    for _, entity in pairs(surface.find_entities_filtered{name = "rocket-silo"}) do
+    for _, entity in pairs(old_silos) do
       local i1 = entity.get_inventory(defines.inventory.rocket_silo_rocket)
       local i2 = entity.get_inventory(defines.inventory.assembling_machine_input)
       if (i1 ~= nil and i1.get_item_count() > 0) or -- Are there inputs (we don't move once someone puts something in it)
@@ -224,8 +228,8 @@ local move_silo = function(amount, contributor, on_launch)
       table.insert(global.plus_contributors, contributor.."(+"..amount..")")
     else
      table.insert(global.minus_contributors, contributor.."("..amount..")")
-   end
- end
+    end
+  end
 
   -- If it's enough to trigger a move and the silo is empty (or it was a launch in case we move "forcefully")
   local move_silo = ((math.abs(global.move_buffer) >= global.move_step or global.x + global.move_buffer >= global.max_distance) and silo_empty)
@@ -259,7 +263,7 @@ local move_silo = function(amount, contributor, on_launch)
       global.minus_contributors = {}
       global.x = new_x
       global.y = math.random(-silo_radius, silo_radius)
-      refresh_silo(on_launch) -- Effect the silo move
+      refresh_silo(on_launch,old_silos) -- Effect the silo move
 
       if new_x >= global.max_distance then
         game.print("We have reached the MAXIMUM DISTANCE! Every "..tostring(global.rocket_step).." tiles will now add one more launch to win.")
@@ -314,7 +318,7 @@ local move_silo = function(amount, contributor, on_launch)
   end
 
   -- Keep track of the move forward for the purpose of multiplying cost
-  if amount ~= 0 then 
+  if amount ~= 0 and global.move_cost_step > 0 then 
     if global.x < global.max_distance then
       global.move_buffer_ratio = global.move_buffer_ratio + amount
       while global.move_buffer_ratio >= global.move_cost_step do
@@ -413,6 +417,15 @@ local on_chunk_generated = function(event)
       resource.amount = ore_base_quantity * a
     end
   end 
+
+  --create tiles around silo when generating chunk (for performance, do it only when chunk is generated, not before)
+  if ((event.area.left_top.x  <= global.x+7 and global.x+7 <= event.area.right_bottom.x) or
+     (event.area.left_top.x  <= global.x+21 and global.x+21 <= event.area.right_bottom.x)) and 
+     ((event.area.left_top.y  <= global.y+7 and global.y+7 <= event.area.right_bottom.y) or
+     (event.area.left_top.y  <= global.y+21 and global.y+21 <= event.area.right_bottom.y)) then
+
+    set_silo_tiles(event.surface)
+  end
 end
 
 -- Make sure rocket-silo research is never enabled
@@ -453,7 +466,7 @@ end
 local on_player_changed_position = function(event)
   if not global.silo_created then
     global.silo_created = true
-    refresh_silo(false)
+    refresh_silo(false,nil)
   end
 
   local player = game.players[event.player_index]
@@ -465,7 +478,7 @@ end
 
 local register_commands = function()
   commands.add_command("refreshsilo", "Move the silo to match the current global.x/global.y settings", function(e) 
-    refresh_silo(false)
+    refresh_silo(false,nil)
     if e.player_index ~= nil then
       if game.players[e.player_index] ~= nil then
         game.players[e.player_index].print("Silo recreated")
@@ -475,11 +488,11 @@ local register_commands = function()
   commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
     local p = e.parameter
     if p == nil then p = "" end
-    local parr = {}
-    for str in string.gmatch(p, "([^%s]+)") do
-      table.insert(parr, str)
-    end
-    if #parr < 2 then 
+
+    local a
+    local user = ""
+    a,user = string.match(p, "([^%s]+)%s+(.*)")
+    if a == nil then
       if e.player_index ~= nil then
         if game.players[e.player_index] ~= nil then
           game.players[e.player_index].print("Not enough parameters to /movesilo")
@@ -488,8 +501,7 @@ local register_commands = function()
       return
     end
 
-    local amount = tonumber(table.remove(parr, 1))
-    local user = table.remove(parr, 1)
+    local amount = tonumber(a)
     if amount ~= nil and user ~= nil then
       move_silo(amount, user, false)
     end

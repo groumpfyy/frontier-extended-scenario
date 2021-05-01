@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.2.3
+Date: 2021.04.30
+    - /movesilo's performance (and general scenario performance when the silo is pushed
+      very far) is vastly improved
+    - Various bugfixes
+---------------------------------------------------------------------------------------------------
 Version: 1.2.2
 Date: 2021.04.25
     - Allow cost ratio to be < 1 (if you want more than 1 tiles per cts)
