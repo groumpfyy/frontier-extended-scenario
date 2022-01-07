@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.2.4
+Date: 2021.04.30
+    - Fix crash on startup with later version of factorio
+    - Add fish in the ocean to help with spidertrons (beware of the Kraken)
+    - Fix crash in editor mode
+---------------------------------------------------------------------------------------------------
 Version: 1.2.3
 Date: 2021.04.30
     - /movesilo's performance (and general scenario performance when the silo is pushed

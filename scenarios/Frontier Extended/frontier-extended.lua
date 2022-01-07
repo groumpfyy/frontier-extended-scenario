@@ -36,7 +36,7 @@ end
 local seed_global_xy = function()
   if global.x == nil or global.y == nil then
     -- math.random is fine for the jitter around x, but for y, we use the game tick... more random
-    global.x = math.random(silo_center, (silo_center+silo_radius))
+    global.x = silo_center + (game.tick+12787132)%silo_radius - silo_radius/2 -- math.random(silo_center, (silo_center+silo_radius))
     global.y = game.tick%silo_radius - silo_radius/2 --  math.random(-silo_radius, silo_radius)
   end 
 end
@@ -381,6 +381,17 @@ local on_chunk_generated = function(event)
     end
     event.surface.set_tiles(tiles, true)
   end
+
+  --put some fish in that water
+  for i = 1, 20 do
+    local p = event.area.right_bottom
+    p.x = p.x + math.random(0,32)
+    p.y = p.y + math.random(0,32)
+    local position = event.surface.find_non_colliding_position('fish', p, 10, 1)
+    if position then
+      event.surface.create_entity {name = 'fish', position = position}
+    end
+  end
     
   --kill off biters inside the wall
   if event.area.right_bottom.x < (deathworld_boundary + 96) then
@@ -418,13 +429,15 @@ local on_chunk_generated = function(event)
     end
   end 
 
-  --create tiles around silo when generating chunk (for performance, do it only when chunk is generated, not before)
-  if ((event.area.left_top.x  <= global.x+7 and global.x+7 <= event.area.right_bottom.x) or
-     (event.area.left_top.x  <= global.x+21 and global.x+21 <= event.area.right_bottom.x)) and 
-     ((event.area.left_top.y  <= global.y+7 and global.y+7 <= event.area.right_bottom.y) or
-     (event.area.left_top.y  <= global.y+21 and global.y+21 <= event.area.right_bottom.y)) then
+  if global.x ~= nil and global.y ~= nil then
+    --create tiles around silo when generating chunk (for performance, do it only when chunk is generated, not before)
+    if ((event.area.left_top.x  <= global.x+7 and global.x+7 <= event.area.right_bottom.x) or
+       (event.area.left_top.x  <= global.x+21 and global.x+21 <= event.area.right_bottom.x)) and 
+       ((event.area.left_top.y  <= global.y+7 and global.y+7 <= event.area.right_bottom.y) or
+       (event.area.left_top.y  <= global.y+21 and global.y+21 <= event.area.right_bottom.y)) then
 
-    set_silo_tiles(event.surface)
+      set_silo_tiles(event.surface)
+    end
   end
 end
 
@@ -472,7 +485,7 @@ local on_player_changed_position = function(event)
   local player = game.players[event.player_index]
   if player.position.x < (-left_water_boundary+24) then 
     player.print("Player was eaten by a Kraken!!!")
-    player.character.die() 
+    if player.character ~= nil then player.character.die() end
   end
 end
 
