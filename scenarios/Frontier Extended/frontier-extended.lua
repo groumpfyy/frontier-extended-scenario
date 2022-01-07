@@ -384,10 +384,11 @@ local on_chunk_generated = function(event)
 
   --put some fish in that water
   for i = 1, 20 do
-    local p = event.area.right_bottom
-    p.x = p.x + math.random(0,32)
-    p.y = p.y + math.random(0,32)
-    local position = event.surface.find_non_colliding_position('fish', p, 10, 1)
+    local px = event.area.right_bottom.x
+    local py = event.area.right_bottom.y
+    px = px + math.random(0,32)
+    py = py + math.random(0,32)
+    local position = event.surface.find_non_colliding_position('fish', { px, py }, 10, 1)
     if position then
       event.surface.create_entity {name = 'fish', position = position}
     end
