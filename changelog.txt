@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 1.2.4
-Date: 2021.04.30
+Date: 2022.01.06
     - Fix crash on startup with later version of factorio
     - Add fish in the ocean to help with spidertrons (beware of the Kraken)
     - Fix crash in editor mode
