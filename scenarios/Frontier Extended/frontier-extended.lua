@@ -15,6 +15,10 @@
 -- - Each death now adds one rocket to launch to win
 -- - Added /autoratiostep <mult> <step> to multiply the cost of a tile by <mult> every <step>. Defaults to multiply by 2 every 50k tiles
 
+-- 2023-06-23 Groumpfyy
+-- - Add visual limit for kraken + commands to move the limit similar to the silo commands
+-- - Leave start area ore generation unchanged for a more fun start
+
 local version = 3
 
 local silo_center = 1700    --center point the silo will be to the right of spawn
@@ -188,6 +192,47 @@ local refresh_silo = function(on_launch,old_silos)
   set_silo_tiles(surface)
 end
 
+-- Delete all kraken limit times, and recreate the boundary tiles at the new position
+local refresh_kraken = function(old_kraken)
+  seed_global_xy()
+
+  local surface = game.get_surface(1)
+
+  -- If we were not given the tile array of the previous kraken, we grab all the water tiles
+  local tiles = {}
+  if old_kraken == nil then
+    old_tiles = surface.find_tiles_filtered{name = "deepwater-green"}
+    local i = 1
+    for _,t in pairs(old_tiles) do
+      tiles[i] = {name = "deepwater", position = t.position}
+      i=i+1
+    end
+  else
+    -- else we fix the old tiles
+    local i = 1
+    for dx = -1,0 do
+      for dy = -silo_radius-150, silo_radius+150 do
+        tiles[i] = {name = "deepwater", position = {-old_kraken-left_water_boundary+dx, dy}}
+        i=i+1
+      end
+    end
+  end
+
+  surface.set_tiles(tiles, true)
+  
+  -- put tiles for the new kraken limit
+  local tiles = {}
+  local i = 1
+  for dx = -1,0 do
+    for dy = -silo_radius-150, silo_radius+150 do
+      tiles[i] = {name = "deepwater-green", position = {-global.kraken_distance-left_water_boundary+dx, dy}}
+      i=i+1
+    end
+  end
+  surface.set_tiles(tiles, true)
+end
+
+
 local move_silo = function(amount, contributor, on_launch)
   seed_global_xy() -- We need to make sure that X/Y are seesed (in case someone moves the silo before moving)
   local surface = game.get_surface(1)
@@ -335,6 +380,55 @@ local move_silo = function(amount, contributor, on_launch)
   end
 end  
 
+local move_kraken = function(amount, contributor)
+  seed_global_xy() -- We need to make sure that X/Y are seesed (in case someone moves the silo before moving)
+  local surface = game.get_surface(1)
+
+  amount = math.max(1,math.floor((amount / global.kraken_move_cost_ratio)+0.5))
+  global.kraken_move_buffer = global.kraken_move_buffer + amount
+
+  -- Remember the caller
+  if amount ~= 0 and contributor ~= "" and contributor ~= nil then 
+    table.insert(global.kraken_contributors, contributor.."(+"..amount..")")
+  end
+
+  -- If it's enough to trigger a move and the silo is empty (or it was a launch in case we move "forcefully")
+  local move_kraken = math.abs(global.kraken_move_buffer) >= global.kraken_move_step
+  if move_kraken then
+    local new_x = global.kraken_distance
+    local old_x = global.kraken_distance
+    -- We moved "enough"
+    new_x = global.kraken_distance + global.kraken_move_buffer
+    global.kraken_move_buffer = 0
+
+    local str = ""
+    str = "The kraken was pushed back by " .. tostring(new_x-global.kraken_distance) .. " tiles thanks to the kindness of " .. table.concat(global.kraken_contributors, ', ')
+    game.print(str)
+      
+    global.kraken_contributors = {}
+    global.kraken_distance = new_x
+
+    refresh_kraken(old_x) -- Effect the silo move
+  else
+    if amount ~= 0 then
+      local str1 = "Thanks to "..contributor..", the kraken will retreat by "..tostring(global.kraken_move_buffer).." ("..signstr(amount)..") tiles"
+      game.print(str1.." when we reach a total of "..tostring(global.kraken_move_step).." tiles.")
+    end
+  end
+
+  -- Keep track of the move forward for the purpose of multiplying cost
+  if amount ~= 0 and global.kraken_move_cost_step > 0 then 
+    global.kraken_move_buffer_ratio = global.kraken_move_buffer_ratio + amount
+    while global.kraken_move_buffer_ratio >= global.kraken_move_cost_step do
+      global.kraken_move_cost_ratio = global.kraken_move_cost_ratio * global.kraken_move_cost_ratio_mult
+      global.kraken_move_buffer_ratio = global.kraken_move_buffer_ratio - global.kraken_move_cost_step
+      local next_increment = global.kraken_move_cost_step - global.kraken_move_buffer_ratio
+      if next_increment < 0 then next_increment = 0 end
+      game.print("You must now request "..tostring(global.kraken_move_cost_ratio).." tiles to actually move by one tile. In "..tostring(next_increment).." tiles, we'll multiply that cost by "..tostring(global.move_cost_ratio_mult).." again.")
+    end
+  end
+end  
+
 local frontier = {}
 
 -- script.on_event(defines.events.on_player_created, 
@@ -382,6 +476,20 @@ local on_chunk_generated = function(event)
     event.surface.set_tiles(tiles, true)
   end
 
+  --put the kraken boundary
+  if (event.area.left_top.x <= -global.kraken_distance-left_water_boundary-1 and event.area.right_bottom.x >= -global.kraken_distance-left_water_boundary-1) or 
+     (event.area.left_top.x <= -global.kraken_distance-left_water_boundary and event.area.right_bottom.x >= -global.kraken_distance-left_water_boundary) then
+    local tiles = {}
+    local i = 1
+    for dx = -1,0 do
+      for dy = 0,31 do
+        tiles[i] = {name = "deepwater-green", position = {-global.kraken_distance-left_water_boundary+dx, event.area.left_top.y+dy}}
+        i=i+1
+      end
+    end
+    event.surface.set_tiles(tiles, true)
+  end
+
   --put some fish in that water
   for i = 1, 20 do
     local px = event.area.right_bottom.x
@@ -420,13 +528,14 @@ local on_chunk_generated = function(event)
   --based off Frontier scenario, it scales freshly generated ore by a scale factor
   for _, resource in pairs(event.surface.find_entities_filtered{area = event.area, type="resource"}) do
     local a
-    if resource.position.x > deathworld_boundary then a = ore_multiplier(resource.position.x-deathworld_boundary)
-    else a = ore_multiplier(ore_base_quantity) end
-    
-    if resource.prototype.resource_category == "basic-fluid" then
-      resource.amount = 3000 * 3 * a
-    elseif resource.prototype.resource_category == "basic-solid" then
-      resource.amount = ore_base_quantity * a
+    if resource.position.x > deathworld_boundary then 
+      a = ore_multiplier(resource.position.x-deathworld_boundary)
+    -- else a = ore_multiplier(ore_base_quantity) end  
+      if resource.prototype.resource_category == "basic-fluid" then
+        resource.amount = 3000 * 3 * a
+      elseif resource.prototype.resource_category == "basic-solid" then
+        resource.amount = ore_base_quantity * a
+      end
     end
   end 
 
@@ -484,14 +593,51 @@ local on_player_changed_position = function(event)
   end
 
   local player = game.players[event.player_index]
-  if player.position.x < (-left_water_boundary+24) then 
-    player.print("Player was eaten by a Kraken!!!")
-    if player.character ~= nil then player.character.die() end
+  if player.position.x < (-left_water_boundary-global.kraken_distance) then 
+    local player_name = "A player"
+    if player.character ~= nil then
+      player_name = player.name
+    end
+    player.print(player_name.." was eaten by a Kraken!!!")
+    if player.character ~= nil then 
+      player.character.die() 
+    end
   end
 end
 
 local register_commands = function()
-  commands.add_command("refreshsilo", "Move the silo to match the current global.x/global.y settings", function(e) 
+  commands.add_command("refreshkraken", "Recreate the visual kraken limit", function(e) 
+    refresh_kraken(nil)
+    if e.player_index ~= nil then
+      if game.players[e.player_index] ~= nil then
+        game.players[e.player_index].print("Kraken boundary recreated")
+      end
+    end
+  end)
+
+  commands.add_command("movekraken", "Move the kraken further/closer (pass an amount and a contributor)", function(e) 
+    local p = e.parameter
+    if p == nil then p = "" end
+
+    local a
+    local user = ""
+    a,user = string.match(p, "([^%s]+)%s+(.*)")
+    if a == nil then
+      if e.player_index ~= nil then
+        if game.players[e.player_index] ~= nil then
+          game.players[e.player_index].print("Not enough parameters to /movekraken")
+        end
+      end
+      return
+    end
+
+    local amount = tonumber(a)
+    if amount ~= nil and user ~= nil then
+      move_kraken(amount, user)
+    end
+  end)
+
+  commands.add_command("refreshsilo", "Recreate the silo in case of issue", function(e) 
     refresh_silo(false,nil)
     if e.player_index ~= nil then
       if game.players[e.player_index] ~= nil then
@@ -499,6 +645,7 @@ local register_commands = function()
       end
     end
   end)
+
   commands.add_command("movesilo", "Move the silo further/closer (pass an amount and a contributor)", function(e) 
     local p = e.parameter
     if p == nil then p = "" end
@@ -546,6 +693,15 @@ local register_commands = function()
     game.print("You need to request a "..tostring(global.move_cost_ratio).." tile move to actually move the silo 1 tile.")
   end)
 
+  commands.add_command("krakenmoveratio", "Set the ratio of move requested to actual move for the kraken boundary", function(e)
+    cr = tonumber(e.parameter)
+    if cr ~= nil then
+      global.kraken_move_cost_ratio = cr
+      if global.kraken_move_cost_ratio <= 0 then global.kraken_move_cost_ratio = 1 end
+    end
+    game.print("You need to request a "..tostring(global.kraken_move_cost_ratio).." tile move to actually move the kraken limit 1 tile.")
+  end)
+
   commands.add_command("rocketcost", "Set the cost in tiles for an additional launch", function(e)
     rs = tonumber(e.parameter)
     if rs ~= nil then
@@ -572,6 +728,7 @@ local register_commands = function()
     end
     game.print("The silo can now be at most "..tostring(global.max_distance).." tiles away.")
   end)
+
   commands.add_command("autoratiostep", "Automatically multiply the cost ratio for on some step", function(e)
     local p = e.parameter
     if p == nil then p = "" end
@@ -597,6 +754,33 @@ local register_commands = function()
       game.print("The cost ratio will now be multiplied by "..tostring(global.move_cost_ratio_mult).." every "..tostring(global.move_cost_step).." tiles foward")
     end
   end)
+
+  commands.add_command("krakenautoratiostep", "Automatically multiply the cost ratio for on some step", function(e)
+    local p = e.parameter
+    if p == nil then p = "" end
+    local parr = {}
+    for str in string.gmatch(p, "([^%s]+)") do
+      table.insert(parr, str)
+    end
+    if #parr < 2 then 
+      if e.player_index ~= nil then
+        if game.players[e.player_index] ~= nil then
+          game.players[e.player_index].print("Not enough parameters to /krakenautoratiostep, need <ratiomult> and <stepsize>")
+        end
+      end
+      return
+    end
+
+    local ratiomult = tonumber(table.remove(parr, 1))
+    local stepsize = tonumber(table.remove(parr, 1))
+
+    if ratiomult ~= nil and stepsize ~= nil then
+      global.kraken_move_cost_ratio_mult = ratiomult
+      global.kraken_move_cost_step = stepsize
+      game.print("The cost ratio will now be multiplied by "..tostring(global.kraken_move_cost_ratio_mult).." every "..tostring(global.kraken_move_cost_step).." tiles backwards for the kraken")
+    end
+  end)
+
   commands.add_command("movestep", "Set the number of actual tiles the silo moves in each step", function(e)
     ms = tonumber(e.parameter)
     if ms ~= nil then
@@ -605,6 +789,15 @@ local register_commands = function()
     end
     game.print("The silo will move in "..tostring(global.move_step).." tile increments.")
   end)
+
+  commands.add_command("krakenmovestep", "Set the number of actual tiles the silo moves in each step", function(e)
+    ms = tonumber(e.parameter)
+    if ms ~= nil then
+      global.kraken_move_step = ms
+      if global.kraken_move_step < 1 then global.kraken_move_step = 1 end
+    end
+    game.print("The kraken will move in "..tostring(global.kraken_move_step).." tile increments.")
+  end)  
 end
 
 local on_rocket_launched = function(event)
@@ -658,6 +851,19 @@ frontier.on_init = function()
   -- Disable default victory and replace our own rocket launch screen (don't think it matters since we are replacing the silo-script entirely)
   global.no_victory = true
 
+  -- Kraken handling
+  global.kraken_distance = 25 -- Where the kraken lives past the water boundary
+
+  global.kraken_move_cost_ratio = 10 -- If the multipler is 2, you need to buy 2x the tiles to actually move 1x
+  global.kraken_move_step = 5 -- By default, we only move 500 tiles at a time
+    
+  global.kraken_move_cost_ratio_mult = 4 -- Be default, we increase the "cost" of a tile by 2
+  global.kraken_move_cost_step = 10 -- Every 50k tiles move
+
+  global.kraken_move_buffer_ratio = 0 -- How many tiles we have moved since the last ratio multiplier
+  global.kraken_move_buffer = 0 -- How many tiles we haven't currently reflected (between +move_step and -move_step)
+  global.kraken_contributors = {} -- List of contributors so far (so that we can print when we actually move the silo)
+
   -- Rockets/silo location management
   global.rockets_to_win = 1
   global.rockets_launched = 0
@@ -674,8 +880,8 @@ frontier.on_init = function()
   
   global.move_cost_ratio_mult = 2 -- Be default, we increase the "cost" of a tile by 2
   global.move_cost_step = 50000 -- Every 50k tiles move
-  global.move_buffer_ratio = 0 -- How many tiles we have moved since the last ratio multiplier
 
+  global.move_buffer_ratio = 0 -- How many tiles we have moved since the last ratio multiplier
   global.move_buffer = 0 -- How many tiles we haven't currently reflected (between +move_step and -move_step)
   global.plus_contributors = {} -- List of contributors so far (so that we can print when we actually move the silo)
   global.minus_contributors = {} -- List of contributors so far (so that we can print when we actually move the silo)
